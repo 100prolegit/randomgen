@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Random YouTube Cycler (Generator + Player)</title>
+  <style>
+    :root { color-scheme: light; }
+    body{
+      margin:0;
+      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+      background:#fff;
+      color:#111;
+      min-height:100vh;
+      display:grid;
+      place-items:center;
+    }
+    .wrap{
+      width:min(1100px, 96vw);
+      display:grid;
+      grid-template-columns: 90px 1fr 90px;
+      gap: 14px;
+      align-items:center;
+      padding: 18px 0;
+    }
+    .btn{
+      height: 90px;
+      width: 90px;
+      border-radius: 999px;
+      border: 1px solid #d0d7de;
+      background: #f6f8fa;
+      cursor: pointer;
+      font-size: 28px;
+      display:grid;
+      place-items:center;
+    }
+    .btn:disabled{ opacity:.5; cursor:not-allowed; }
+    .center{
+      display:grid;
+      gap:10px;
+      justify-items:center;
+      width: 100%;
+    }
+    .player{
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background:#000;
+      border-radius: 12px;
+      overflow:hidden;
+      border: 1px solid #d0d7de;
+    }
+    .status{
+      font-size: 14px;
+      color:#333;
+      text-align:center;
+      max-width: 90ch;
+      line-height: 1.35;
+    }
+    .mini{
+      border: 1px solid #d0d7de;
+      background:#fff;
+      padding: 8px 10px;
+      border-radius: 10px;
+      cursor:pointer;
+      font-weight:600;
+      margin: 0 6px;
+    }
+    .mini:disabled{ opacity:.6; cursor:not-allowed; }
+    .panel{
+      width: 100%;
+      border: 1px solid #d0d7de;
+      border-radius: 12px;
+      padding: 10px 12px;
+      display:flex;
+      gap: 10px;
+      align-items:center;
+      justify-content:center;
+      flex-wrap: wrap;
+      background: #fff;
+    }
+    input[type="number"]{
+      width: 90px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      border: 1px solid #d0d7de;
+      font-size: 14px;
+    }
+    .hint{ font-size: 12px; color:#666; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <button class="btn" id="prevBtn" disabled>◀</button>
+
+    <div class="center">
+      <!-- Generator-Panel -->
+      <div class="panel">
+        <label>
+          Anzahl Links:
+          <input type="number" id="count" value="30" min="1" max="500">
+        </label>
+        <button class="mini" id="genBtn">Links generieren</button>
+        <button class="mini" id="clearBtn">Liste leeren</button>
+        <span class="hint" id="poolInfo"></span>
+      </div>
+
+      <div class="player" id="player"></div>
+
+      <div>
+        <button class="mini" id="openBtn" disabled>Auf YouTube öffnen</button>
+        <button class="mini" id="copyBtn" disabled>Link kopieren</button>
+      </div>
+
+      <div class="status" id="status">Lade…</div>
+    </div>
+
+    <button class="btn" id="nextBtn" disabled>▶</button>
+  </div>
+
+  <!-- Nur IFrame Player API (keine Data API, kein API-Key) -->
+  <script src="https://www.youtube.com/iframe_api"></script>
+
+  <script>
+    /************************************************************
+     * 1) Generator (aus deiner Generator-HTML übernommen)
+     *    - wählt zufällig aus "realVideoIds"
+     *    - baut watch?v=... Links
+     ************************************************************/
+    const realVideoIds = [
+      'r5YWnedceXc', 'dQw4w9WgXcQ', '9bZkp7q19f0', 'kJQP7kiw5Fk',
+      'JGwWNGJdvx8', 'RgKAFK5djSk', 'OPf0YbXqDm0', 'nfWlot6h_JM',
+      'CevxZvSJLk8', 'pRpeEdMmmQ0', 'uelHwf8o7_U', '09R81CFnzqQ',
+      'YQHsXMglC9A', 'fJ9rUzIMcZQ', 'kffacXsA2Pk', 'tAGnKpE4NUI',
+      '60ItHLz5WEA', '2vjPBrBU-TM', 'hTWKbfoikeg', '1w7OgIMMRc4',
+      'ktvTqknDobg', 'btGAbXEpYCs', 'pXRviuL6vMY', 'vx2u5uUu3DE',
+      'Sj5J3Q6VOyw', 'QGJuMBdaqLw', 'e-ORhEE9VVg', 'y6Sxv-sUYtM',
+      'UprcpdwXigY', 'nf337Rk0xSw', '1G4isv_Fylg', '8SbUC-UaAEE',
+      'h_m-BEjrwqg', 'YykjpeuMNEE', 'fLexgOxsZuM', 'uxpDa-c-4Mc',
+      'papuvlVeZg', '7PCkvCPvDXk', '5qm8PH4xAss', '4JipHEz53Ls'
+    ];
+
+    function generateLinks(count){
+      const n = Math.max(1, Math.min(count, 500));
+      // Zufällige Auswahl ohne Duplikate (so wie in deinem Generator)
+      const shuffled = [...realVideoIds].sort(() => 0.5 - Math.random());
+      const selected = shuffled.slice(0, Math.min(n, shuffled.length));
+      return selected.map(id => `https://www.youtube.com/watch?v=${id}`);
+    }
+
+    /************************************************************
+     * 2) Cycler (deine Logik) – nur: VIDEO_IDS kommen aus Generator
+     ************************************************************/
+    function extractYouTubeId(input){
+      if(!input) return null;
+      const s = String(input).trim();
+
+      if (/^[A-Za-z0-9_-]{11}$/.test(s)) return s;
+
+      try{
+        const u = new URL(s);
+
+        if (u.hostname.includes("youtu.be")){
+          const id = u.pathname.replace(/^\/+/, "").split("/")[0];
+          return /^[A-Za-z0-9_-]{11}$/.test(id) ? id : null;
+        }
+
+        const v = u.searchParams.get("v");
+        if (v && /^[A-Za-z0-9_-]{11}$/.test(v)) return v;
+
+        const mShorts = u.pathname.match(/\/shorts\/([A-Za-z0-9_-]{11})/);
+        if (mShorts) return mShorts[1];
+
+        const mEmbed = u.pathname.match(/\/embed\/([A-Za-z0-9_-]{11})/);
+        if (mEmbed) return mEmbed[1];
+
+        return null;
+      }catch{
+        const m = s.match(/[?&]v=([A-Za-z0-9_-]{11})/);
+        return m ? m[1] : null;
+      }
+    }
+
+    let player;
+    let currentVideoId = null;
+    const backStack = [];
+    let bag = [];
+
+    // Dynamischer Pool (statt fester YOUTUBE_URLS)
+    let VIDEO_IDS = [];
+
+    const prevBtn = document.getElementById("prevBtn");
+    const nextBtn = document.getElementById("nextBtn");
+    const statusEl = document.getElementById("status");
+    const openBtn = document.getElementById("openBtn");
+    const copyBtn = document.getElementById("copyBtn");
+
+    const countInput = document.getElementById("count");
+    const genBtn = document.getElementById("genBtn");
+    const clearBtn = document.getElementById("clearBtn");
+    const poolInfo = document.getElementById("poolInfo");
+
+    function setStatus(t){ statusEl.textContent = t; }
+
+    function shuffle(arr){
+      for(let i = arr.length - 1; i > 0; i--){
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    }
+
+    function refillBag(){
+      bag = shuffle([...VIDEO_IDS]);
+    }
+
+    function nextFromBag(){
+      if(!bag.length) refillBag();
+      return bag.pop();
+    }
+
+    function updateActionButtons(vid){
+      const url = `https://www.youtube.com/watch?v=${vid}`;
+      openBtn.disabled = false;
+      copyBtn.disabled = false;
+      openBtn.onclick = ()=>window.open(url, "_blank");
+      copyBtn.onclick = ()=>navigator.clipboard.writeText(url);
+    }
+
+    function loadById(vid, pushToBackStack = true){
+      if(!vid) return;
+
+      if(pushToBackStack && currentVideoId){
+        backStack.push(currentVideoId);
+      }
+
+      currentVideoId = vid;
+      prevBtn.disabled = backStack.length === 0;
+
+      setStatus("Lade Video…");
+      nextBtn.disabled = true;
+
+      if(player && typeof player.loadVideoById === "function"){
+        player.loadVideoById(vid);
+      }
+
+      updateActionButtons(vid);
+      nextBtn.disabled = false;
+      setStatus(`Video geladen • Pool: ${VIDEO_IDS.length} • Back: ${backStack.length}`);
+    }
+
+    function loadRandom(){
+      if(!VIDEO_IDS.length){
+        setStatus("Kein Pool geladen. Oben Links generieren.");
+        nextBtn.disabled = true;
+        openBtn.disabled = true;
+        copyBtn.disabled = true;
+        return;
+      }
+
+      let vid = nextFromBag();
+      if(VIDEO_IDS.length > 1 && vid === currentVideoId){
+        vid = nextFromBag();
+      }
+      loadById(vid, true);
+    }
+
+    function goBack(){
+      if(!backStack.length) return;
+      const vid = backStack.pop();
+      prevBtn.disabled = backStack.length === 0;
+      loadById(vid, false);
+    }
+
+    prevBtn.addEventListener("click", goBack);
+    nextBtn.addEventListener("click", loadRandom);
+
+    function rebuildPoolFromLinks(links){
+      VIDEO_IDS = Array.from(new Set(links.map(extractYouTubeId).filter(Boolean)));
+      backStack.length = 0;
+      prevBtn.disabled = true;
+      refillBag();
+      poolInfo.textContent = `Pool: ${VIDEO_IDS.length} IDs`;
+      nextBtn.disabled = VIDEO_IDS.length === 0;
+    }
+
+    genBtn.addEventListener("click", () => {
+      const count = parseInt(countInput.value, 10) || 1;
+      const links = generateLinks(count);
+
+      rebuildPoolFromLinks(links);
+
+      if(VIDEO_IDS.length){
+        setStatus(`Links generiert. Starte Wiedergabe…`);
+        loadRandom();
+      }else{
+        setStatus("Generiert, aber keine gültigen IDs extrahiert.");
+      }
+    });
+
+    clearBtn.addEventListener("click", () => {
+      VIDEO_IDS = [];
+      bag = [];
+      backStack.length = 0;
+      currentVideoId = null;
+      prevBtn.disabled = true;
+      nextBtn.disabled = true;
+      openBtn.disabled = true;
+      copyBtn.disabled = true;
+      poolInfo.textContent = `Pool: 0 IDs`;
+      setStatus("Liste geleert.");
+      try{
+        if(player && typeof player.stopVideo === "function") player.stopVideo();
+      }catch{}
+    });
+
+    function onYouTubeIframeAPIReady(){
+      setStatus(`Bereite Player vor…`);
+      player = new YT.Player("player",{
+        host: "https://www.youtube-nocookie.com",
+        width: "100%",
+        height: "100%",
+        playerVars: { autoplay: 1, rel: 0 },
+        events: {
+          onReady: () => {
+            poolInfo.textContent = `Pool: 0 IDs`;
+            setStatus(`Bereit. Oben Links generieren.`);
+            // Optional: direkt initial generieren:
+            // genBtn.click();
+          },
+          onError: () => {
+            setStatus("Video nicht abspielbar – überspringe…");
+            loadRandom();
+          }
+        }
+      });
+    }
+    window.onYouTubeIframeAPIReady = onYouTubeIframeAPIReady;
+  </script>
+</body>
+</html>
